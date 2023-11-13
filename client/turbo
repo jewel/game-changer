@@ -1,0 +1,188 @@
+#!/usr/bin/ruby
+
+require 'gtk3'
+
+class Turbo
+  def initialize
+    @app = Gtk::Application.new 'com.tuxng.turbo', :flags_none
+
+    @app.signal_connect('activate') { on_activate _1 }
+
+    @app.run
+  end
+
+  private
+
+  def on_activate app
+    @window = Gtk::ApplicationWindow.new app
+    @window.set_title 'Turbo Encabulator'
+    @window.set_default_size 800, 600
+
+    @window.signal_connect 'key-press-event' do |widget, event|
+      if event.keyval == Gdk::Keyval::KEY_Escape
+        app.quit
+      end
+    end
+
+    Thread.new do
+      sleep 0.5
+      GLib::Idle.add do
+        show_logins
+        false
+      end
+    end
+    show_spinner
+  end
+
+  def switch_contents content
+    @window.remove @content if @content
+    @content = content
+    @window.add @content
+    @window.show_all
+  end
+
+
+  def show_spinner
+    box = Gtk::Box.new :vertical, 5
+    box.set_valign Gtk::Align::CENTER
+    spinner = Gtk::Spinner.new
+    spinner.set_size_request 64, 64
+    spinner.start
+    box.add spinner
+
+    switch_contents box
+  end
+
+  def show_logins
+    margin_box = Gtk::Box.new :vertical, 0
+    margin_box.set_valign Gtk::Align::CENTER
+    margin_box.set_halign Gtk::Align::CENTER
+
+    list_box = Gtk::ListBox.new
+    margin_box.add list_box
+
+    # list_box.set_selection_mode Gtk::SelectionMode::NONE
+    list_box.set_valign Gtk::Align::CENTER
+    list_box.set_halign Gtk::Align::CENTER
+    list_box.set_margin_top 50
+    list_box.set_margin_left 50
+    list_box.set_margin_right 50
+    list_box.set_margin_bottom 50
+
+
+    people = [
+      {
+        name: "Taylro",
+        icon: "/home/jewel/Downloads/People/2119.jpg",
+      },
+      {
+        name: "Mahgna",
+        icon: '/home/jewel/Downloads/People/31500.jpg',
+      },
+      {
+        name: "Britner",
+        icon: '/home/jewel/Downloads/People/2028.jpg',
+      },
+    ]
+    people.each do |user|
+      row = Gtk::ListBoxRow.new
+      list_box.add row
+
+      button = Gtk::Button.new
+      row.add button
+
+      box = Gtk::Box.new :horizontal, 20
+      button.add box
+
+      pixbuf = GdkPixbuf::Pixbuf.new file: user[:icon]
+      icon_height = 64
+      aspect_ratio = pixbuf.width.to_f / pixbuf.height.to_f
+      new_width = (icon_height * aspect_ratio).round
+      scaled_pixbuf = pixbuf.scale_simple new_width, icon_height, GdkPixbuf::InterpType::BILINEAR
+      icon = Gtk::Image.new pixbuf: scaled_pixbuf
+      label = Gtk::Label.new user[:name]
+      box.add icon
+      box.add label
+
+      button.signal_connect 'clicked' do
+        show_spinner
+        Thread.new do
+          sleep 2
+          GLib::Idle.add do
+            show_games
+            false
+          end
+        end
+      end
+
+    end
+
+    switch_contents margin_box
+  end
+
+  def show_games
+    grid = Gtk::FlowBox.new
+    games = [
+      {
+        name: "Hoobastank",
+        icon: '/home/jewel/Downloads/People/11575.jpg'
+      },
+      {
+        name: "Lucky Irish",
+        icon: '/home/jewel/Downloads/People/16142.jpg'
+      },
+      {
+        name: "Lemmings",
+        icon: '/home/jewel/Downloads/People/29245.jpg'
+      },
+    ]
+    games.each do |game|
+      button = Gtk::Button.new
+      grid.add button
+      box = Gtk::Box.new :vertical, 20
+      button.add box
+
+      button.signal_connect 'clicked' do
+        spawn_game
+      end
+
+      pixbuf = GdkPixbuf::Pixbuf.new file: game[:icon]
+      icon_height = 256
+      aspect_ratio = pixbuf.width.to_f / pixbuf.height.to_f
+      new_width = (icon_height * aspect_ratio).round
+      scaled_pixbuf = pixbuf.scale_simple new_width, icon_height, GdkPixbuf::InterpType::BILINEAR
+      icon = Gtk::Image.new pixbuf: scaled_pixbuf
+      label = Gtk::Label.new game[:name]
+      box.add icon
+      box.add label
+    end
+
+    switch_contents grid
+  end
+
+  def spawn_game
+    box = Gtk::Box.new :vertical, 5
+    box.set_valign Gtk::Align::CENTER
+    spinner = Gtk::Spinner.new
+    spinner.set_size_request 64, 64
+    spinner.start
+    box.add spinner
+    label = Gtk::Label.new "Launching GAME"
+    box.add label
+
+    switch_contents box
+    Thread.new do
+      sleep 1
+      GLib::Idle.add do
+        spinner.hide
+        label.set_text "Running GAME"
+      end
+      system "chromium --app https://www.friv.com"
+      GLib::Idle.add do
+        show_games
+      end
+    end
+  end
+end
+
+Turbo.new
