@@ -1,6 +1,17 @@
 #!/usr/bin/ruby
 
+# Gems
 require 'gtk3'
+require 'httparty'
+
+# Standard library
+require 'base64'
+require 'fileutils'
+require 'net/http'
+require 'cgi'
+
+Thread.abort_on_exception = true
+Thread.report_on_exception = false
 
 class Turbo
   def initialize
@@ -11,11 +22,15 @@ class Turbo
     @app.run
   end
 
+  def inspect
+    "#<Turbo>"
+  end
+
   private
 
   def on_activate app
     @window = Gtk::ApplicationWindow.new app
-    @window.set_title 'Turbo Encabulator'
+    @window.set_title 'Game Changer'
     @window.set_default_size 800, 600
 
     @window.signal_connect 'key-press-event' do |widget, event|
@@ -25,11 +40,7 @@ class Turbo
     end
 
     Thread.new do
-      sleep 0.5
-      GLib::Idle.add do
-        show_logins
-        false
-      end
+      fetch_users
     end
     show_spinner
   end
@@ -64,27 +75,8 @@ class Turbo
     # list_box.set_selection_mode Gtk::SelectionMode::NONE
     list_box.set_valign Gtk::Align::CENTER
     list_box.set_halign Gtk::Align::CENTER
-    list_box.set_margin_top 50
-    list_box.set_margin_left 50
-    list_box.set_margin_right 50
-    list_box.set_margin_bottom 50
 
-
-    people = [
-      {
-        name: "Taylro",
-        icon: "/home/jewel/Downloads/People/2119.jpg",
-      },
-      {
-        name: "Mahgna",
-        icon: '/home/jewel/Downloads/People/31500.jpg',
-      },
-      {
-        name: "Britner",
-        icon: '/home/jewel/Downloads/People/2028.jpg',
-      },
-    ]
-    people.each do |user|
+    @users.each do |user|
       row = Gtk::ListBoxRow.new
       list_box.add row
 
@@ -94,24 +86,14 @@ class Turbo
       box = Gtk::Box.new :horizontal, 20
       button.add box
 
-      pixbuf = GdkPixbuf::Pixbuf.new file: user[:icon]
-      icon_height = 64
-      aspect_ratio = pixbuf.width.to_f / pixbuf.height.to_f
-      new_width = (icon_height * aspect_ratio).round
-      scaled_pixbuf = pixbuf.scale_simple new_width, icon_height, GdkPixbuf::InterpType::BILINEAR
-      icon = Gtk::Image.new pixbuf: scaled_pixbuf
+      box.add load_icon user, 64
       label = Gtk::Label.new user[:name]
-      box.add icon
       box.add label
 
       button.signal_connect 'clicked' do
         show_spinner
         Thread.new do
-          sleep 2
-          GLib::Idle.add do
-            show_games
-            false
-          end
+          fetch_games
         end
       end
 
@@ -120,68 +102,247 @@ class Turbo
     switch_contents margin_box
   end
 
+  def server_url
+    "http://localhost:4004/"
+  end
+
+  def get uri
+    res = HTTParty.get "#{server_url}#{uri}", format: :plain
+    JSON.parse res, symbolize_names: true
+  end
+
+  def main_thread method=nil
+    GLib::Idle.add do
+      if method
+        send method
+      elsif block_given?
+        yield
+      else
+        raise "Nothing to do"
+      end
+      false
+    end
+  end
+
+  def fetch_users
+    @users = get "/users"
+    main_thread :show_logins
+  end
+
+  def fetch_games
+    @games = get("/games").select { _1[:default_version] }
+
+    main_thread :show_games
+  end
+
+  def load_icon obj, height
+    if obj[:icon] && obj[:icon] != ""
+      icon = Base64.decode64 obj[:icon]
+      loader = GdkPixbuf::PixbufLoader.new
+      loader.write icon
+      loader.close
+      pixbuf = loader.pixbuf
+
+      aspect_ratio = pixbuf.width.to_f / pixbuf.height.to_f
+      new_width = (height * aspect_ratio).round
+      scaled_pixbuf = pixbuf.scale_simple new_width, height, GdkPixbuf::InterpType::BILINEAR
+      icon = Gtk::Image.new pixbuf: scaled_pixbuf
+    else
+      icon = Gtk::DrawingArea.new
+      icon.set_size_request 256, 256
+      icon.signal_connect "draw" do |widget, cr|
+        # Pick a random color based on the ID
+        r = Random.new obj[:id]
+        cr.set_source_rgb r.rand, r.rand, r.rand
+        cr.rectangle 0, 0, widget.allocated_width, widget.allocated_height
+        cr.fill
+      end
+    end
+    icon
+  end
+
   def show_games
     grid = Gtk::FlowBox.new
-    games = [
-      {
-        name: "Hoobastank",
-        icon: '/home/jewel/Downloads/People/11575.jpg'
-      },
-      {
-        name: "Lucky Irish",
-        icon: '/home/jewel/Downloads/People/16142.jpg'
-      },
-      {
-        name: "Lemmings",
-        icon: '/home/jewel/Downloads/People/29245.jpg'
-      },
-    ]
-    games.each do |game|
+    grid.set_valign Gtk::Align::CENTER
+    grid.set_halign Gtk::Align::CENTER
+    @games.each do |game|
       button = Gtk::Button.new
       grid.add button
       box = Gtk::Box.new :vertical, 20
       button.add box
 
       button.signal_connect 'clicked' do
-        spawn_game
+        spawn_game game
       end
 
-      pixbuf = GdkPixbuf::Pixbuf.new file: game[:icon]
-      icon_height = 256
-      aspect_ratio = pixbuf.width.to_f / pixbuf.height.to_f
-      new_width = (icon_height * aspect_ratio).round
-      scaled_pixbuf = pixbuf.scale_simple new_width, icon_height, GdkPixbuf::InterpType::BILINEAR
-      icon = Gtk::Image.new pixbuf: scaled_pixbuf
+      box.add load_icon game, 256
+
       label = Gtk::Label.new game[:name]
-      box.add icon
       box.add label
     end
 
     switch_contents grid
   end
 
-  def spawn_game
+  def game_path version
+    "#{storage_path version}/game"
+  end
+
+  def storage_path version
+    "/tmp/game-changer/#{version[:id]}"
+  end
+
+  def download_game game
+    version = game[:default_version]
+    # Load more data
+    version = get "/versions/#{version[:id]}"
+
+    # FIXME we should first count all the files we already have, and
+    # queue up those we need, so that we can give them a progress bar of just
+    # what we intend to download.
+    downloaded = 0
+
+    basedir = game_path version
+    uri = URI server_url
+    Net::HTTP.start uri.host, uri.port do |http|
+      version[:content].each do |file|
+        dest = "#{basedir}/#{file[:path]}"
+        mtime = Time.at file[:mtime]
+
+        if File.exist? dest
+          stat = File.stat dest
+          if (stat.mtime - mtime).abs <= 0.1 && stat.size == file[:size]
+            puts "correct: #{file[:path]}"
+            next
+          end
+          puts "incorrect: #{file[:path]}"
+          File.unlink dest
+        end
+
+        puts "downloading: #{file[:path]}"
+
+        url = "#{version[:storage_url]}/#{CGI.escape file[:path]}"
+        url.gsub! "%2F", "/"
+        url.gsub! "+", "%20"
+
+        req = Net::HTTP::Get.new url
+        http.request req do |res|
+          if res.code != "200"
+            raise "HTTP Failure code: #{res.code}"
+          end
+          FileUtils.mkdir_p File.dirname dest
+          File.open dest, 'wb' do |io|
+            last_update = Time.new
+            res.read_body do |chunk|
+              io.write chunk
+              downloaded += chunk.size
+              if Time.new - last_update > 1.0 / 30
+                update_status "Downloading #{game[:name]} #{(downloaded.to_f/version[:size]*100).round(1)}%"
+                last_update = Time.new
+              end
+            end
+          end
+        end
+        File.utime mtime, mtime, dest
+        mode = 0444
+        mode |= 0111 if file[:executable]
+        mode |= 0200 if file[:writable]
+        File.chmod mode, dest
+
+        stat = File.stat dest
+        unless (stat.mtime - mtime).abs <= 0.1 && stat.size == file[:size]
+          raise "Was not able to save #{dest} properly"
+        end
+      end
+    end
+
+    # Cleanup any extra cruft from a previous run
+    # FIXME We could check for a previous run's save games first before wiping
+    # them here
+    allowed_paths = Set.new
+    version[:content].each do |file|
+      allowed_paths.add file[:path]
+    end
+
+    Dir.glob "**/*", File::FNM_DOTMATCH, base: basedir do |path|
+      fullpath = "#{basedir}/#{path}"
+      next if File.directory? fullpath
+      next if allowed_paths.member? path
+      puts "remove: #{path}"
+      # TODO add removal code here.
+    end
+
+    # Clean out everything else besides the game path
+    Dir.glob "**/*", File::FNM_DOTMATCH, base: storage_path(version) do |path|
+      file = Pathname.new "#{storage_path(version)}/#{path}"
+      next if file.directory?
+      p file.to_s
+      next if file.to_s.start_with? "#{basedir}/"
+      puts "remove other: #{path}"
+    end
+    exit
+
+    launch_game game, version
+  end
+
+  def launch_game game, version
+    # FIXME use a PTY here to capture stdout and stderr
+    if version[:command] && version[:command] != ""
+      command = version[:command]
+    else
+      # Guess at which file we should run, hopefully there's just one
+      command = version[:content].sort_by { _1[:path] }.select { _1[:executable] }.first[:path]
+    end
+
+    # TODO use pgroup so we can watch all children
+    # TODO build full environment
+    env = clean_environment version
+    pid = Process.spawn env, "./#{command}", chdir: game_path(version), unsetenv_others: true
+    update_status "Running #{game[:name]}"
+    main_thread do
+      @spinner.hide
+    end
+    Process.wait pid
+    main_thread :show_games
+  end
+
+  def update_status message
+    main_thread do
+      @status&.set_text message
+    end
+  end
+
+  def spawn_game game
     box = Gtk::Box.new :vertical, 5
     box.set_valign Gtk::Align::CENTER
     spinner = Gtk::Spinner.new
     spinner.set_size_request 64, 64
     spinner.start
     box.add spinner
-    label = Gtk::Label.new "Launching GAME"
+    label = Gtk::Label.new "Downloading #{game[:name]}"
     box.add label
+
+    @status = label
+    @spinner = spinner
 
     switch_contents box
     Thread.new do
-      sleep 1
-      GLib::Idle.add do
-        spinner.hide
-        label.set_text "Running GAME"
-      end
-      system "chromium --app https://www.friv.com"
-      GLib::Idle.add do
-        show_games
-      end
+      download_game game
     end
+  end
+
+  def clean_environment version
+    basedir = storage_path version
+    {
+      'SHELL' => "/bin/bash",
+      'PWD' => basedir,
+      'LANG' => ENV['LANG'],
+      'DISPLAY' => ENV['DISPLAY'],
+      'XAUTHORITY' => ENV['XAUTHORITY'],
+      'HOME' => basedir,
+      'USER' => "ggttyl",
+      'USERNAME' => "ggttyl",
+    }
   end
 end
 
