@@ -5,7 +5,7 @@ class Version < ApplicationRecord
   after_commit :process_tar
 
   def storage_directory
-    "#{Rails.root}/public#{storage_url}"
+    Rails.root + "public#{storage_url}"
   end
 
   def storage_url
@@ -30,10 +30,10 @@ class Version < ApplicationRecord
 
   def content
     res = []
-    Dir.glob("**/*", File::FNM_DOTMATCH, base: storage_directory) do |path|
-      file = Pathname.new "#{storage_directory}/#{path}"
+    storage_directory.find do |file|
       stat = file.stat
       next unless stat.file?
+      path = file.relative_path_from storage_directory
       res.push({
         path: path,
         size: stat.size,
@@ -70,11 +70,11 @@ class Version < ApplicationRecord
 
     count = 0
     bytes = 0
-    Dir.glob "**/*", base: storage_directory do |path|
-      stat = File.stat "#{storage_directory}/#{path}"
-      next if stat.directory?
+
+    storage_directory.find do |file|
+      next unless file.file?
       count += 1
-      bytes += stat.size
+      bytes += file.size
     end
 
     self.files = count

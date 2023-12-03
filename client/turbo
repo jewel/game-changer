@@ -1,6 +1,7 @@
 #!/usr/bin/ruby
 
 # Gems
+# (all available in ubuntu via apt)
 require 'gtk3'
 require 'httparty'
 
@@ -65,6 +66,7 @@ class Turbo
   end
 
   def show_logins
+    # FIXME handle no logins configured
     margin_box = Gtk::Box.new :vertical, 0
     margin_box.set_valign Gtk::Align::CENTER
     margin_box.set_halign Gtk::Align::CENTER
@@ -91,6 +93,7 @@ class Turbo
       box.add label
 
       button.signal_connect 'clicked' do
+        @user = user
         show_spinner
         Thread.new do
           fetch_games
@@ -108,7 +111,7 @@ class Turbo
 
   def get uri
     res = HTTParty.get "#{server_url}#{uri}", format: :plain
-    JSON.parse res, symbolize_names: true
+    JSON.parse res.body, symbolize_names: true
   end
 
   def main_thread method=nil
@@ -162,6 +165,7 @@ class Turbo
   end
 
   def show_games
+    # FIXME handle no games to show
     grid = Gtk::FlowBox.new
     grid.set_valign Gtk::Align::CENTER
     grid.set_halign Gtk::Align::CENTER
@@ -185,11 +189,11 @@ class Turbo
   end
 
   def game_path version
-    "#{storage_path version}/game"
+    storage_path(version) + "game"
   end
 
   def storage_path version
-    "/tmp/game-changer/#{version[:id]}"
+    Pathname.new "/tmp/game-changer/#{version[:id]}"
   end
 
   def download_game game
@@ -264,25 +268,95 @@ class Turbo
       allowed_paths.add file[:path]
     end
 
-    Dir.glob "**/*", File::FNM_DOTMATCH, base: basedir do |path|
-      fullpath = "#{basedir}/#{path}"
-      next if File.directory? fullpath
-      next if allowed_paths.member? path
-      puts "remove: #{path}"
-      # TODO add removal code here.
-    end
-
     # Clean out everything else besides the game path
-    Dir.glob "**/*", File::FNM_DOTMATCH, base: storage_path(version) do |path|
-      file = Pathname.new "#{storage_path(version)}/#{path}"
-      next if file.directory?
-      p file.to_s
-      next if file.to_s.start_with? "#{basedir}/"
-      puts "remove other: #{path}"
-    end
-    exit
+    storage_path(version).find do |file|
+      next unless file.file?
+      if file.to_s.start_with? "#{basedir}/"
+        path = file.relative_path_from basedir
+        next if allowed_paths.member? path.to_s
+        puts "remove game: #{file}"
+      else
+        puts "remove other: #{file}"
+      end
 
+      file.unlink
+    end
+
+    update_status "Finding saved games"
+    save = get "/saves/latest/#{@user[:id]}/#{game[:id]}"
+    if save
+      download_save save, game, version
+    end
     launch_game game, version
+  end
+
+  def download_save save, game, version
+    uri = URI server_url
+    Net::HTTP.start uri.host, uri.port do |http|
+      req = Net::HTTP::Get.new "/saves/#{@user[:id]}/#{game[:id]}/#{save[:id]}"
+      http.request req do |res|
+        if res.code != "200"
+          raise "HTTP Failure code: #{res.code}"
+        end
+        # FIXME use the Content-Length to give the user progress updates
+        buffer = String.new
+        path_length = nil
+        path = nil
+        file = nil
+        size = nil
+        written = nil
+        res.read_body do |chunk|
+          puts "Chunk:  #{chunk.inspect}"
+          buffer << chunk
+          loop do
+            break if buffer.empty?
+            if !path_length
+              if buffer =~ /\A(.*\n)/
+                path_length = $1.to_i
+                buffer = buffer[$1.bytesize..]
+              else
+                break
+              end
+            end
+            if path_length && !path
+              if buffer.size >= path_length
+                path = buffer[0...path_length]
+                puts "path is #{path.inspect}"
+                file = File.open "#{storage_path version}/#{path}", 'wb'
+                written = 0
+                buffer = buffer[path_length..]
+              else
+                break
+              end
+            end
+            if path && !size
+              if buffer =~ /\A(.*\n)/
+                size = $1.to_i
+                puts "size is #$1"
+                buffer = buffer[($1.bytesize)..]
+              else
+                break
+              end
+            end
+            if file
+              remaining = size - written
+              puts "need #{remaining}"
+              written += file.write buffer[0...remaining]
+              puts "written #{written}"
+              buffer = buffer[remaining..]
+              if written == size
+                file.close
+                path_length = nil
+                file = nil
+                path = nil
+                size = nil
+                written = nil
+              end
+            end
+          end
+        end
+      end
+    end
   end
 
   def launch_game game, version
@@ -297,16 +371,136 @@ class Turbo
     # TODO use pgroup so we can watch all children
     # TODO build full environment
     env = clean_environment version
-    pid = Process.spawn env, "./#{command}", chdir: game_path(version), unsetenv_others: true
+    pid = Process.spawn env, "#{command}", chdir: game_path(version).to_s, unsetenv_others: true
     update_status "Running #{game[:name]}"
     main_thread do
       @spinner.hide
     end
     Process.wait pid
+    update_status "Uploading saved games from #{game[:name]}"
+    upload_saves game, version
     main_thread :show_games
   end
 
+  def upload_saves game, version
+    game_files = {}
+    version[:content].each do |file|
+      game_files[file[:path]] = file
+    end
+
+    basedir = game_path(version)
+
+    files = []
+    total_size = 0
+
+    storage_path(version).find do |file|
+      next unless file.file?
+      if file.to_s.start_with? "#{basedir}/"
+        path = file.relative_path_from basedir
+        # ignore game files unless they have changed
+        if old = game_files[path.to_s]
+          mtime = Time.at old[:mtime]
+          stat = file.stat
+          next if (stat.mtime - mtime).abs <= 0.1 && stat.size == old[:size]
+          puts "game file changed: #{path}"
+        end
+      end
+      path = file.relative_path_from storage_path(version)
+      puts "backing up: #{path}"
+      total_size += file.size
+      files.push file
+    end
+
+    # FIXME, we really only need to upload new saved games files, not all the
+    # historical saved games, every time.  Finding a way to do so will let us
+    # speed the upload and save disk space.
+    puts "Saved games are #{files.size} files, #{(total_size.to_f / 1024 / 1024).round(1)} MB"
+    uri = URI server_url
+    Net::HTTP.start uri.host, uri.port do |http|
+      req = Net::HTTP::Put.new "/saves/#{@user[:id]}/#{version[:id]}"
+      req.add_field 'Transfer-Encoding', 'chunked'
+      req.add_field 'Content-Type', 'application/octet-stream'
+      req.add_field 'Accept', 'application/json'
+
+      # We have to invert control, letting the Net::HTTP call into our fake IO
+      # object when it needs more data
+      io = Class.new do
+        def read size=4096, outbuf=nil
+          raise "Need a next_chunk block" unless @next_chunk
+          chunk = @next_chunk.call size
+          if chunk && outbuf
+            outbuf.clear
+            outbuf << chunk
+          end
+          # next_chunk is allowed to return "" which means it's time to retry
+          return read(size, outbuf) if chunk && chunk.size == 0
+          chunk
+        end
+
+        def next_chunk &block
+          @next_chunk = block
+        end
+
+        def close
+        end
+      end.new
+
+      # Can't get msgpack streaming to work with Net::HTTP streaming, so we'll
+      # make our own little protocol.  This essentially double-chunks the
+      # stream, which is fine.
+      file = nil
+      handle = nil
+
+      length = nil
+      target = nil
+
+      io.next_chunk do |size|
+        if !file
+          file = files.shift
+          if file
+            path = file.relative_path_from(storage_path(version))
+            s = String.new
+            s << path.to_s.bytesize.to_s
+            s << "\n"
+            s << path.to_s
+            s
+          else
+            nil # signal EOF
+          end
+        elsif !handle
+          handle = file.open 'rb'
+          s = String.new
+          target = handle.size
+          length = 0
+          s << target.to_s
+          s << "\n"
+          s
+        else
+          chunk = handle.read size
+          if !chunk
+            if target != length
+              raise "File size changed during reading"
+            end
+            handle = nil
+            file = nil
+            length = nil
+            target = nil
+            redo
+          else
+            length += chunk.bytesize
+            chunk
+          end
+        end
+      end
+      req.body_stream = io
+      res = http.request req
+      # TODO error handling here
+      puts "Server said #{res.body}"
+    end
+  end
+
   def update_status message
+    puts message
     main_thread do
       @status&.set_text message
     end
@@ -332,16 +526,16 @@ class Turbo
   end
 
   def clean_environment version
-    basedir = storage_path version
     {
       'SHELL' => "/bin/bash",
-      'PWD' => basedir,
+      'PWD' => game_path(version).to_s,
       'LANG' => ENV['LANG'],
       'DISPLAY' => ENV['DISPLAY'],
       'XAUTHORITY' => ENV['XAUTHORITY'],
-      'HOME' => basedir,
+      'HOME' => storage_path(version).to_s,
       'USER' => "ggttyl",
       'USERNAME' => "ggttyl",
+      'PATH' => "#{game_path(version)}:#{ENV['PATH']}",
     }
   end
 end

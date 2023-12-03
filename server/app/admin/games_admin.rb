@@ -26,6 +26,10 @@ Trestle.resource(:games) do
         )
       end if game.icon
       file_field :icon, label: "New Icon"
+      if !game.persisted?
+        text_field :version_number
+        file_field :upload_tar
+      end
       text_field :command
       text_area :environment
     end

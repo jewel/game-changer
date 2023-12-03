@@ -24,15 +24,17 @@ ActiveRecord::Schema[7.1].define(version: 2023_11_23_195918) do
     t.index ["default_version_id"], name: "index_games_on_default_version_id"
   end
 
-  create_table "saved_games", force: :cascade do |t|
+  create_table "saves", force: :cascade do |t|
     t.integer "user_id", null: false
     t.integer "version_id", null: false
+    t.integer "station_id", null: false
     t.integer "size"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.datetime "deleted_at"
-    t.index ["user_id"], name: "index_saved_games_on_user_id"
-    t.index ["version_id"], name: "index_saved_games_on_version_id"
+    t.index ["station_id"], name: "index_saves_on_station_id"
+    t.index ["user_id"], name: "index_saves_on_user_id"
+    t.index ["version_id"], name: "index_saves_on_version_id"
   end
 
   create_table "sessions", force: :cascade do |t|

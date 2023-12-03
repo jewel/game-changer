@@ -30,9 +30,10 @@ class InitialSchema < ActiveRecord::Migration[7.1]
       t.timestamps
     end
 
-    create_table :saved_games do |t|
+    create_table :saves do |t|
       t.references :user, null: false
       t.references :version, null: false
+      t.references :station, null: false
       t.integer :size
       t.timestamps
       t.timestamp :deleted_at
