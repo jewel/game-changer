@@ -78,6 +78,8 @@ class Turbo
     list_box.set_valign Gtk::Align::CENTER
     list_box.set_halign Gtk::Align::CENTER
 
+    placeholders = []
+
     @users.each do |user|
       row = Gtk::ListBoxRow.new
       list_box.add row
@@ -88,7 +90,7 @@ class Turbo
       box = Gtk::Box.new :horizontal, 20
       button.add box
 
-      box.add load_icon user, 64
+      box.add load_icon user, 64, placeholders
       label = Gtk::Label.new user[:name]
       box.add label
 
@@ -102,7 +104,15 @@ class Turbo
 
     end
 
+    Thread.new do
+      download_icons placeholders
+    end
+
     switch_contents margin_box
+  end
+
+  def bucket_url hash
+    "#{server_url}bucket/#{hash[0...2]}/#{hash[0...4]}/#{hash}"
   end
 
   def server_url
@@ -112,6 +122,12 @@ class Turbo
   def get uri
     res = HTTParty.get "#{server_url}#{uri}", format: :plain
     JSON.parse res.body, symbolize_names: true
+  end
+
+  def fetch_bucket hash
+    res = HTTParty.get bucket_url hash
+    raise "Can't fetch #{hash}" unless res.code == 200
+    res.body
   end
 
   def main_thread method=nil
@@ -138,19 +154,27 @@ class Turbo
     main_thread :show_games
   end
 
-  def load_icon obj, height
-    if obj[:icon] && obj[:icon] != ""
-      icon = Base64.decode64 obj[:icon]
-      loader = GdkPixbuf::PixbufLoader.new
-      loader.write icon
-      loader.close
-      pixbuf = loader.pixbuf
+  def download_icons placeholders
+    placeholders.each do |(hash, height, widget)|
+      picture = fetch_bucket hash
+      main_thread do
+        loader = GdkPixbuf::PixbufLoader.new
+        loader.write picture
+        loader.close
+        pixbuf = loader.pixbuf
 
-      aspect_ratio = pixbuf.width.to_f / pixbuf.height.to_f
-      new_width = (height * aspect_ratio).round
-      scaled_pixbuf = pixbuf.scale_simple new_width, height, GdkPixbuf::InterpType::BILINEAR
-      icon = Gtk::Image.new pixbuf: scaled_pixbuf
-    else
+        aspect_ratio = pixbuf.width.to_f / pixbuf.height.to_f
+        new_width = (height * aspect_ratio).round
+        scaled_pixbuf = pixbuf.scale_simple new_width, height, GdkPixbuf::InterpType::BILINEAR
+        widget.add Gtk::Image.new pixbuf: scaled_pixbuf
+        widget.show_all
+      end
+    end
+  end
+
+  def load_icon obj, height, placeholders
+    hash = obj[:icon] || ""
+    if hash == ""
       icon = Gtk::DrawingArea.new
       icon.set_size_request 256, 256
       icon.signal_connect "draw" do |widget, cr|
@@ -160,8 +184,12 @@ class Turbo
         cr.rectangle 0, 0, widget.allocated_width, widget.allocated_height
         cr.fill
       end
+      return icon
     end
-    icon
+
+    placeholder = Gtk::Box.new :vertical, 0
+    placeholders.push [hash, height, placeholder]
+    return placeholder
   end
 
   def show_games
@@ -169,6 +197,7 @@ class Turbo
     grid = Gtk::FlowBox.new
     grid.set_valign Gtk::Align::CENTER
     grid.set_halign Gtk::Align::CENTER
+    placeholders = []
     @games.each do |game|
       button = Gtk::Button.new
       grid.add button
@@ -179,11 +208,13 @@ class Turbo
         spawn_game game
       end
 
-      box.add load_icon game, 256
+      box.add load_icon game, 256, placeholders
 
       label = Gtk::Label.new game[:name]
       box.add label
     end
+
+    download_icons placeholders
 
     switch_contents grid
   end
@@ -209,26 +240,23 @@ class Turbo
     basedir = game_path version
     uri = URI server_url
     Net::HTTP.start uri.host, uri.port do |http|
-      version[:content].each do |file|
-        dest = "#{basedir}/#{file[:path]}"
-        mtime = Time.at file[:mtime]
+      version[:bucket].each do |(path, hash, size, mtime, executable)|
+        dest = "#{basedir}/#{path}"
+        mtime = Time.at mtime
 
         if File.exist? dest
           stat = File.stat dest
-          if (stat.mtime - mtime).abs <= 0.1 && stat.size == file[:size]
-            puts "correct: #{file[:path]}"
+          if (stat.mtime - mtime).abs <= 0.1 && stat.size == size
+            puts "correct: #{path}"
             next
           end
-          puts "incorrect: #{file[:path]}"
+          puts "incorrect: #{path}"
           File.unlink dest
         end
 
-        puts "downloading: #{file[:path]}"
+        puts "downloading: #{path}"
 
-        url = "#{version[:storage_url]}/#{CGI.escape file[:path]}"
-        url.gsub! "%2F", "/"
-        url.gsub! "+", "%20"
-
+        url = bucket_url hash
         req = Net::HTTP::Get.new url
         http.request req do |res|
           if res.code != "200"
@@ -248,13 +276,12 @@ class Turbo
           end
         end
         File.utime mtime, mtime, dest
-        mode = 0444
-        mode |= 0111 if file[:executable]
-        mode |= 0200 if file[:writable]
+        mode = 0666
+        mode |= 0111 if executable
         File.chmod mode, dest
 
         stat = File.stat dest
-        unless (stat.mtime - mtime).abs <= 0.1 && stat.size == file[:size]
+        unless (stat.mtime - mtime).abs <= 0.1 && stat.size == size
           raise "Was not able to save #{dest} properly"
         end
       end
@@ -264,8 +291,8 @@ class Turbo
     # FIXME We could check for a previous run's save games first before wiping
     # them here
     allowed_paths = Set.new
-    version[:content].each do |file|
-      allowed_paths.add file[:path]
+    version[:bucket].each do |(path, hash, size, mtime, executable)|
+      allowed_paths.add path
     end
 
     # Clean out everything else besides the game path
@@ -364,8 +391,7 @@ class Turbo
     if version[:command] && version[:command] != ""
       command = version[:command]
     else
-      # Guess at which file we should run, hopefully there's just one
-      command = version[:content].sort_by { _1[:path] }.select { _1[:executable] }.first[:path]
+      raise "No command"
     end
 
     # TODO use pgroup so we can watch all children

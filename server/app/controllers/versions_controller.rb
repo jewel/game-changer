@@ -11,8 +11,7 @@ class VersionsController < ApplicationController
       command: game.command,
       environment: game.environment,
       number: version.number,
-      storage_url: version.storage_url,
-      content: version.content,
+      bucket: version.bucket,
     }
 
     render json: json
