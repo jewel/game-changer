@@ -3,6 +3,8 @@ class VersionsController < ApplicationController
     version = Version.find params[:id]
     game = version.game
 
+    files = Bucket.from_compact_json(version.bucket).as_json
+
     # Don't use serializer because we want to add in some stuff
     json = {
       id: version.id,
@@ -11,7 +13,7 @@ class VersionsController < ApplicationController
       command: game.command,
       environment: game.environment,
       number: version.number,
-      bucket: version.bucket,
+      bucket: files,
     }
 
     render json: json

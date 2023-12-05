@@ -16,7 +16,7 @@ class Version < ApplicationRecord
     end
 
     self.size = size
-    self.bucket = bucket.as_json
+    self.bucket = bucket.as_compact_json
   end
 
   def tar= tar
@@ -35,7 +35,7 @@ class Version < ApplicationRecord
       end
     end
     self.size = bytes
-    self.bucket = bucket.as_json
+    self.bucket = bucket.as_compact_json
   end
 
   private

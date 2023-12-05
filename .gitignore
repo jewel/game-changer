@@ -30,8 +30,6 @@
 !/server/tmp/storage/.keep
 
 /server/public/assets
-/server/public/games/
-/server/public/saves/
 /server/public/bucket/
 
 # Ignore master key for decrypting credentials and more.

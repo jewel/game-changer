@@ -232,21 +232,45 @@ class Turbo
     # Load more data
     version = get "/versions/#{version[:id]}"
 
+    bucket = version[:bucket]
+    bucket.each do |file|
+      file.dup.merge({path: "game/#{file[:path]}"})
+    end
+
+    save = get "/saves/latest?user_id=#{@user[:id]}&game_id=#{game[:id]}"
+
+    # Saved files may overlap game files (e.g. if a preferences file is updated)
+    if save
+      bucket = bucket + save[:bucket]
+      pp bucket.map { _1[:path] }
+      # remove duplicates, last one wins
+      paths = Set.new
+      bucket.reverse!
+      bucket.select! do |file|
+        present = paths.member? file[:path]
+        paths.add file[:path]
+        !present
+      end
+      bucket.reverse!
+      pp bucket.map { _1[:path] }
+    end
+
     # FIXME we should first count all the files we already have, and
     # queue up those we need, so that we can give them a progress bar of just
     # what we intend to download.
     downloaded = 0
 
-    basedir = game_path version
+    basedir = storage_path version
     uri = URI server_url
     Net::HTTP.start uri.host, uri.port do |http|
-      version[:bucket].each do |(path, hash, size, mtime, executable)|
+      version[:bucket].each do |file|
+        path = file[:path]
         dest = "#{basedir}/#{path}"
-        mtime = Time.at mtime
+        mtime = Time.at file[:mtime]
 
         if File.exist? dest
           stat = File.stat dest
-          if (stat.mtime - mtime).abs <= 0.1 && stat.size == size
+          if (stat.mtime - mtime).abs <= 0.1 && stat.size == file[:size]
             puts "correct: #{path}"
             next
           end
@@ -254,9 +278,9 @@ class Turbo
           File.unlink dest
         end
 
+        url = bucket_url file[:hash]
         puts "downloading: #{path}"
 
-        url = bucket_url hash
         req = Net::HTTP::Get.new url
         http.request req do |res|
           if res.code != "200"
@@ -277,11 +301,11 @@ class Turbo
         end
         File.utime mtime, mtime, dest
         mode = 0666
-        mode |= 0111 if executable
+        mode |= 0111 if file[:executable]
         File.chmod mode, dest
 
         stat = File.stat dest
-        unless (stat.mtime - mtime).abs <= 0.1 && stat.size == size
+        unless (stat.mtime - mtime).abs <= 0.1 && stat.size == file[:size]
           raise "Was not able to save #{dest} properly"
         end
       end
@@ -291,102 +315,24 @@ class Turbo
     # FIXME We could check for a previous run's save games first before wiping
     # them here
     allowed_paths = Set.new
-    version[:bucket].each do |(path, hash, size, mtime, executable)|
-      allowed_paths.add path
+    bucket.each do |file|
+      allowed_paths.add file[:path]
     end
 
     # Clean out everything else besides the game path
     storage_path(version).find do |file|
       next unless file.file?
-      if file.to_s.start_with? "#{basedir}/"
-        path = file.relative_path_from basedir
-        next if allowed_paths.member? path.to_s
-        puts "remove game: #{file}"
-      else
-        puts "remove other: #{file}"
-      end
+      path = file.relative_path_from basedir
+      next if allowed_paths.member? path.to_s
+      puts "remove: #{path}"
 
       file.unlink
     end
 
-    update_status "Finding saved games"
-    save = get "/saves/latest/#{@user[:id]}/#{game[:id]}"
-    if save
-      download_save save, game, version
-    end
-    launch_game game, version
+    launch_game game, version, save
   end
 
-  def download_save save, game, version
-    uri = URI server_url
-    Net::HTTP.start uri.host, uri.port do |http|
-      req = Net::HTTP::Get.new "/saves/#{@user[:id]}/#{game[:id]}/#{save[:id]}"
-      http.request req do |res|
-        if res.code != "200"
-          raise "HTTP Failure code: #{res.code}"
-        end
-        # FIXME use the Content-Length to give the user progress updates
-        buffer = String.new
-        path_length = nil
-        path = nil
-        file = nil
-        size = nil
-        written = nil
-        res.read_body do |chunk|
-          puts "Chunk:  #{chunk.inspect}"
-          buffer << chunk
-          loop do
-            break if buffer.empty?
-            if !path_length
-              if buffer =~ /\A(.*\n)/
-                path_length = $1.to_i
-                buffer = buffer[$1.bytesize..]
-              else
-                break
-              end
-            end
-            if path_length && !path
-              if buffer.size >= path_length
-                path = buffer[0...path_length]
-                puts "path is #{path.inspect}"
-                file = File.open "#{storage_path version}/#{path}", 'wb'
-                written = 0
-                buffer = buffer[path_length..]
-              else
-                break
-              end
-            end
-            if path && !size
-              if buffer =~ /\A(.*\n)/
-                size = $1.to_i
-                puts "size is #$1"
-                buffer = buffer[($1.bytesize)..]
-              else
-                break
-              end
-            end
-            if file
-              remaining = size - written
-              puts "need #{remaining}"
-              written += file.write buffer[0...remaining]
-              puts "written #{written}"
-              buffer = buffer[remaining..]
-              if written == size
-                file.close
-                path_length = nil
-                file = nil
-                path = nil
-                size = nil
-                written = nil
-              end
-            end
-          end
-        end
-      end
-    end
-  end
-
-  def launch_game game, version
+  def launch_game game, version, old_save
     # FIXME use a PTY here to capture stdout and stderr
     if version[:command] && version[:command] != ""
       command = version[:command]
@@ -404,13 +350,13 @@ class Turbo
     end
     Process.wait pid
     update_status "Uploading saved games from #{game[:name]}"
-    upload_saves game, version
+    upload_save game, version, old_save
     main_thread :show_games
   end
 
-  def upload_saves game, version
+  def upload_save game, version, old_save
     game_files = {}
-    version[:content].each do |file|
+    version[:bucket].each do |file|
       game_files[file[:path]] = file
     end
 
@@ -419,109 +365,77 @@ class Turbo
     files = []
     total_size = 0
 
-    storage_path(version).find do |file|
-      next unless file.file?
-      if file.to_s.start_with? "#{basedir}/"
-        path = file.relative_path_from basedir
-        # ignore game files unless they have changed
-        if old = game_files[path.to_s]
-          mtime = Time.at old[:mtime]
-          stat = file.stat
-          next if (stat.mtime - mtime).abs <= 0.1 && stat.size == old[:size]
-          puts "game file changed: #{path}"
-        end
+    old_save_by_path = {}
+    if old_save
+      old_save[:bucket].each do |file|
+        old_save_by_path[file[:path]] = file
       end
-      path = file.relative_path_from storage_path(version)
-      puts "backing up: #{path}"
-      total_size += file.size
-      files.push file
     end
 
-    # FIXME, we really only need to upload new saved games files, not all the
-    # historical saved games, every time.  Finding a way to do so will let us
-    # speed the upload and save disk space.
-    puts "Saved games are #{files.size} files, #{(total_size.to_f / 1024 / 1024).round(1)} MB"
     uri = URI server_url
     Net::HTTP.start uri.host, uri.port do |http|
-      req = Net::HTTP::Put.new "/saves/#{@user[:id]}/#{version[:id]}"
-      req.add_field 'Transfer-Encoding', 'chunked'
-      req.add_field 'Content-Type', 'application/octet-stream'
-      req.add_field 'Accept', 'application/json'
-
-      # We have to invert control, letting the Net::HTTP call into our fake IO
-      # object when it needs more data
-      io = Class.new do
-        def read size=4096, outbuf=nil
-          raise "Need a next_chunk block" unless @next_chunk
-          chunk = @next_chunk.call size
-          if chunk && outbuf
-            outbuf.clear
-            outbuf << chunk
+      save_bucket = []
+      storage_path(version).find do |file|
+        next unless file.file?
+        if file.to_s.start_with? "#{basedir}/"
+          path = file.relative_path_from basedir
+          # ignore game files unless they have changed
+          if old = game_files[path.to_s]
+            mtime = Time.at old[:mtime]
+            stat = file.stat
+            next if (stat.mtime - mtime).abs <= 0.1 && stat.size == old[:size]
+            puts "game file changed: #{path}"
           end
-          # next_chunk is allowed to return "" which means it's time to retry
-          return read(size, outbuf) if chunk && chunk.size == 0
-          chunk
         end
 
-        def next_chunk &block
-          @next_chunk = block
-        end
-
-        def close
-        end
-      end.new
-
-      # Can't get msgpack streaming to work with Net::HTTP streaming, so we'll
-      # make our own little protocol.  This essentially double-chunks the
-      # stream, which is fine.
-      file = nil
-      handle = nil
-
-      length = nil
-      target = nil
-
-      io.next_chunk do |size|
-        if !file
-          file = files.shift
-          if file
-            path = file.relative_path_from(storage_path(version))
-            s = String.new
-            s << path.to_s.bytesize.to_s
-            s << "\n"
-            s << path.to_s
-            s
+        path = file.relative_path_from storage_path(version)
+        # Now check if file hasn't changed from the last save, if it hasn't
+        # then we don't need to upload it again, but we still need to include
+        # it in the backup
+        hash = nil
+        if old = old_save_by_path[path.to_s]
+          mtime = Time.at old[:mtime]
+          stat = file.stat
+          if (stat.mtime - mtime).abs <= 0.1 && stat.size == old[:size]
+            hash = old[:hash]
+            puts "old save file not changed: #{path}"
           else
-            nil # signal EOF
-          end
-        elsif !handle
-          handle = file.open 'rb'
-          s = String.new
-          target = handle.size
-          length = 0
-          s << target.to_s
-          s << "\n"
-          s
-        else
-          chunk = handle.read size
-          if !chunk
-            if target != length
-              raise "File size changed during reading"
-            end
-            handle = nil
-            file = nil
-            length = nil
-            target = nil
-            redo
-          else
-            length += chunk.bytesize
-            chunk
+            puts "old save file changed: #{path}"
           end
         end
+
+        if !hash
+          puts "uploading: #{path}"
+          req = Net::HTTP::Post.new "/bucket_files"
+          form_data = [['file', file.open('rb')]]
+          req.set_form form_data, 'multipart/form-data'
+          res = http.request req
+          if res.code != "200"
+            pp res
+            raise "Could not upload, error #{res.code}: #{path}"
+          end
+          obj = JSON.parse res.body, symbolize_names: true
+          hash = obj[:hash]
+          raise "Missing hash" unless hash
+        end
+
+        save_bucket.push({
+          path: path,
+          hash: hash,
+          size: file.size,
+          mtime: file.mtime.to_f,
+          executable: file.stat.executable?,
+        })
       end
-      req.body_stream = io
+
+      req = Net::HTTP::Post.new "/saves?user_id=#{@user[:id]}&version_id=#{version[:id]}"
+      req.add_field "Content-Type", "application/json"
+      req.body = save_bucket.to_json
       res = http.request req
-      # TODO error handling here
-      puts "Server said #{res.body}"
+      if res.code != "200"
+        pp res
+        raise "Could not upload bucket, error #{res.code}"
+      end
     end
   end
 

@@ -3,12 +3,16 @@ Rails.application.routes.draw do
 
   get "up" => "rails/health#show", as: :rails_health_check
 
+  resources :bucket_files
   resources :users
   resources :games
   resources :versions
-  resources :saves
-  put 'saves/:user_id/:version_id', to: 'saves#upload'
-  get 'saves/latest/:user_id/:game_id', to: 'saves#latest'
+  resources :saves do
+    collection do
+      get :latest
+    end
+  end
+
 
   root to: redirect("/admin")
 end

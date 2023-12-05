@@ -5,20 +5,28 @@ class SavesController < ApplicationController
     save = Save.joins(:version).where(user: user, version: {game: game})
       .order(:created_at).last
 
+    if save
+      bucket = Bucket.from_compact_json save.bucket
+      save = save.as_json
+      save[:bucket] = bucket.as_json
+    end
+
     render json: save
   end
 
-  def upload
+  def create
     user = User.find params[:user_id]
     version = Version.find params[:version_id]
+
+    json = JSON.parse request.body.read, symbolize_names: true
+    bucket = Bucket.from_json json
 
     save = Save.create!({
       user: user,
       version: version,
-      size: request.body.size,
       station_id: 0,
+      bucket: bucket.as_compact_json,
     })
-    save.write_to_disk request.body
 
     render plain: "OK"
   end
