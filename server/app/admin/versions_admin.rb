@@ -13,8 +13,6 @@ Trestle.resource(:versions) do
     text_field :number
 
     if version.persisted?
-      static_field :files
-
       static_field :size, number_to_human_size(version.size)
     else
       file_field :directory, multiple: true, webkitDirectory: true

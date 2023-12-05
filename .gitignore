@@ -32,6 +32,7 @@
 /server/public/assets
 /server/public/games/
 /server/public/saves/
+/server/public/bucket/
 
 # Ignore master key for decrypting credentials and more.
 /server/config/master.key

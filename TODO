@@ -1,0 +1,55 @@
+[] make trestle page for games
+[] make trestle page for versions
+[] accept uploads of whole directories as new versions
+[] store version into filesystem, preserving mtime
+[] fetch list of files that are part of the game
+  [] can be sped up by being moved to the database
+[] download game as individual files, directly over HTTP
+  [] can be sped up with fast compression
+  [] can be sped up with pipelining
+  [] can be sped up with parallel downloads and writes
+[] extract saved games by walking through the manifest and seeing what has changed.
+[] extract saved games periodically
+  [] can watch filesystem to notice faster
+[] add ability to "sync" an already downloaded game, reverting any changes and new files.  This will download any files again that have changed.
+  [] can be sped up with rsync algorithm, but it's unlikely that large files will be part of the original repository
+
+[] crash recovery if the computer is shut down; make sure to upload whatever saved game state we have on next boot
+
+[] change out HOME directory
+
+[] game launching should be a dialog so that hte user can alt-tab and kill the game or start a new one
+
+[ ] put the icons in the bit bucket
+
+OTHER:
+
+[] Rename project to "Game Changer".
+
+[] can we use flutter and compile for windows?  ezra wants to play his saved games at Grandpa's house
+  [] we could also make a USB linux boot for that
+
+[] integration with ispy
+
+[] integrate with chort
+
+[] Add client updates from ../client
+
+[] let admin start a guest account
+
+[] remove trestle and have the administration all on the frontend; backend could
+   just be sinatra and active record and sqlite, or possibly just flat files
+
+
+[] add in setup for browser games; to avoid tracking we can do either firefox
+  or chromium with user-data-dir.
+
+[] Saved games can get huge, e.g. factorio.  The current protocol for storage
+  works well, except we don't know how much it
+
+
+[] glimmer-dsl-libui combined with traveling ruby should work.  it'll be ruby 2.4 but that's fine
+
+[] we could also use nim and nigui, which makes tiny executables
+
+[] golang's fyne also works, with huge executables

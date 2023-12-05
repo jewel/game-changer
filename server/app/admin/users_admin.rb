@@ -16,7 +16,7 @@ Trestle.resource(:users) do
         content_tag(
           :img,
           nil,
-          src: "data:;base64,#{user.icon}",
+          src: Bucket.url(user.icon),
           width: "100",
         )
       end if user.icon

@@ -13,7 +13,7 @@
 ActiveRecord::Schema[7.1].define(version: 2023_11_23_195918) do
   create_table "games", force: :cascade do |t|
     t.string "name", null: false
-    t.text "icon"
+    t.string "icon"
     t.integer "min_age"
     t.datetime "deleted_at"
     t.string "command"
@@ -29,6 +29,7 @@ ActiveRecord::Schema[7.1].define(version: 2023_11_23_195918) do
     t.integer "version_id", null: false
     t.integer "station_id", null: false
     t.integer "size"
+    t.json "bucket", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.datetime "deleted_at"
@@ -57,7 +58,7 @@ ActiveRecord::Schema[7.1].define(version: 2023_11_23_195918) do
 
   create_table "users", force: :cascade do |t|
     t.string "name", null: false
-    t.text "icon"
+    t.string "icon"
     t.string "password", null: false
     t.datetime "last_login"
     t.integer "age"
@@ -69,8 +70,8 @@ ActiveRecord::Schema[7.1].define(version: 2023_11_23_195918) do
   create_table "versions", force: :cascade do |t|
     t.integer "game_id", null: false
     t.string "number", null: false
-    t.integer "files", null: false
     t.integer "size", null: false
+    t.json "bucket", null: false
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false

@@ -15,7 +15,7 @@ class Game < ApplicationRecord
   end
 
   def icon= file
-    self[:icon] = Base64.encode64 file.read
+    self[:icon] = Bucket.add file
   end
 
   def upload_tar= file
@@ -37,8 +37,6 @@ class Game < ApplicationRecord
     versions.create!({
       number: @version_number,
       tar: @tar,
-      files: 0,
-      size: 0,
     })
   end
 end

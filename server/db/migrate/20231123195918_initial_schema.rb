@@ -2,7 +2,7 @@ class InitialSchema < ActiveRecord::Migration[7.1]
   def change
     create_table :users do |t|
       t.string :name, null: false
-      t.text :icon
+      t.string :icon
       t.string :password, null: false
       t.timestamp :last_login
       t.integer :age
@@ -12,7 +12,7 @@ class InitialSchema < ActiveRecord::Migration[7.1]
 
     create_table :games do |t|
       t.string :name, null: false
-      t.text :icon
+      t.string :icon
       t.integer :min_age
       t.timestamp :deleted_at
       t.string :command
@@ -24,8 +24,8 @@ class InitialSchema < ActiveRecord::Migration[7.1]
     create_table :versions do |t|
       t.references :game, null: false
       t.string :number, null: false
-      t.integer :files, null: false
       t.integer :size, null: false
+      t.json :bucket, null: false
       t.timestamp :deleted_at
       t.timestamps
     end
@@ -35,6 +35,7 @@ class InitialSchema < ActiveRecord::Migration[7.1]
       t.references :version, null: false
       t.references :station, null: false
       t.integer :size
+      t.json :bucket, null: false
       t.timestamps
       t.timestamp :deleted_at
     end

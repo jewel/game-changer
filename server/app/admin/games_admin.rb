@@ -21,7 +21,7 @@ Trestle.resource(:games) do
         content_tag(
           :img,
           nil,
-          src: "data:;base64,#{game.icon}",
+          src: Bucket.url(game.icon),
           width: "100",
         )
       end if game.icon
@@ -38,7 +38,6 @@ Trestle.resource(:games) do
       tab :versions do
         table game.versions.order(created_at: :desc), admin: :versions do
           column :number
-          column :files
           column :size do
             number_to_human_size _1.size
           end
