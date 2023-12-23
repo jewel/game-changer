@@ -13,6 +13,7 @@ Rails.application.routes.draw do
     end
   end
 
+  get 'install', to: 'clients#install'
 
   root to: redirect("/admin")
 end

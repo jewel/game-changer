@@ -1,0 +1,22 @@
+#!/usr/bin/ruby
+
+# Gems
+# (all available in ubuntu via apt)
+require 'gtk3'
+require 'httparty'
+
+# Standard library
+require 'base64'
+require 'fileutils'
+require 'net/http'
+require 'cgi'
+
+Thread.abort_on_exception = true
+Thread.report_on_exception = false
+
+Gtk.init
+
+require_relative "lib/app"
+
+app = App.new
+app.run
