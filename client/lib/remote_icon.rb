@@ -1,10 +1,10 @@
 class RemoteIcon
   class << self
-    def widget obj, height
+    def widget obj, size
       hash = obj[:icon] || ""
       if hash == ""
         icon = Gtk::DrawingArea.new
-        icon.set_size_request 256, 256
+        icon.set_size_request size, size
         icon.signal_connect "draw" do |widget, cr|
           # Pick a random color based on the ID
           r = Random.new obj[:id]
@@ -16,7 +16,8 @@ class RemoteIcon
       end
 
       placeholder = Gtk::Box.new :vertical, 0
-      start_download hash, height, placeholder
+      placeholder.set_size_request size, size
+      start_download hash, size, placeholder
       placeholder
     end
 
@@ -36,7 +37,7 @@ class RemoteIcon
       end
     end
 
-    def download hash, height, placeholder
+    def download hash, size, placeholder
       picture = Server.fetch_bucket hash
       main_thread do
         loader = GdkPixbuf::PixbufLoader.new
@@ -45,8 +46,13 @@ class RemoteIcon
         pixbuf = loader.pixbuf
 
         aspect_ratio = pixbuf.width.to_f / pixbuf.height.to_f
-        new_width = (height * aspect_ratio).round
-        scaled_pixbuf = pixbuf.scale_simple new_width, height, GdkPixbuf::InterpType::BILINEAR
+        new_width = (size * aspect_ratio).round
+        new_height = size
+        if new_width > size
+          new_width = size
+          new_height = (size / aspect_ratio).round
+        end
+        scaled_pixbuf = pixbuf.scale_simple new_width, new_height, GdkPixbuf::InterpType::BILINEAR
         placeholder.add Gtk::Image.new pixbuf: scaled_pixbuf
         placeholder.show_all
       end

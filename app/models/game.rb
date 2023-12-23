@@ -15,7 +15,7 @@ class Game < ApplicationRecord
   end
 
   def icon= file
-    self[:icon] = Bucket.add file
+    self[:icon] = BucketFile.store file
   end
 
   def upload_tar= file

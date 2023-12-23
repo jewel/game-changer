@@ -21,7 +21,7 @@ Trestle.resource(:games) do
         content_tag(
           :img,
           nil,
-          src: Bucket.url(game.icon),
+          src: BucketFile.url(game.icon),
           width: "100",
         )
       end if game.icon
