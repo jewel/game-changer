@@ -6,6 +6,28 @@ set -e
 echo "Server URL is <%= @server_url %>"
 echo "<%= @server_url %>" > /etc/game-changer-server
 
+cat > /usr/local/bin/game-changer-autoupdate <<- EOF
+#!/bin/bash
+set -e
+server=$(cat /etc/game-changer-server)
+curl -s $server/install | bash
+EOF
+chmod a+x /usr/local/bin/game-changer-autoupdate
+
+echo "Configuration auto-update service"
+cat > /etc/systemd/system/game-changer-autoupdate.service <<- EOF
+[Unit]
+Description=Update Game Changer
+
+[Service]
+ExecStart=/usr/local/bin/game-changer-autoupdate
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable game-changer-autoupdate
+
 echo "Installing .desktop file"
 mkdir -p /usr/local/share/applications
 cat > /usr/local/share/applications/game-changer.desktop <<- EOF
@@ -52,6 +74,6 @@ SystemAccount=false
 EOF
 
 echo "Installing dependencies from apt"
-DEBIAN_FRONTEND=noninteractive apt-get install -y ruby-httparty ruby-gtk3 ruby
+DEBIAN_FRONTEND=noninteractive apt-get install -qq -y ruby-httparty ruby-gtk3 ruby
 
-# TODO Add a script to boot that will run the install script again, to handle further client upgrades.
+echo "Ready to go!"
