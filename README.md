@@ -41,12 +41,35 @@ Requirements
 Server installation
 -----
 
-Note: more instructions to come
+The server is a standard rails app.  To run under docker:
 
-Start the rails server.
+```
+mkdir /var/local/game-changer
+chown 1000.1000 /var/local/game-changer
+docker build -t game-changer .
+echo SECRET_KEY_BASE=supersecretrandom > .env
+docker run --env-file=.env -d --restart unless-stopped \
+  -p 4004:3000 \
+  --mount type=bind,source=/var/local/game-changer,target=/rails/storage \
+  game-changer
+```
 
-The games will be stored in public/bucket.  The saved games will be stored in
-there too.
+Without docker:
+
+```
+bundle install
+RAILS_ENV=production bin/rails db:migrate
+RAILS_ENV=production bin/rails server --bind 0 --port 4004
+```
+
+The games will be stored in the "storage" directory.  The saved games will be
+stored in there too.  By default, a sqlite database will also be in that
+directory.
+
+Navigate to http://server:4004/admin and add some users and games.
+
+Games are best uploaded as a tar file, as that will preserve the executable bit.
+
 
 Client installation
 -----
@@ -54,7 +77,7 @@ Client installation
 The server manages client installations and upgrades.
 
 To do the first install, run the following on each kid computer.  Currently this
-only supports Ubuntu 22.04.
+is only tested on Ubuntu 22.04.
 
 ```bash
 curl -s http://server-url/install | sudo bash
