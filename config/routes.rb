@@ -14,6 +14,7 @@ Rails.application.routes.draw do
   end
 
   get 'install', to: 'clients#install'
+  get 'clients/tarball', to: 'clients#tarball'
 
   root to: redirect("/admin")
 end

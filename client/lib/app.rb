@@ -31,12 +31,6 @@ class App
     @window.set_title 'Game Changer'
     @window.set_default_size 800, 600
 
-    @window.signal_connect 'key-press-event' do |widget, event|
-      if event.keyval == Gdk::Keyval::KEY_Escape
-        app.quit
-      end
-    end
-
     Thread.new do
       fetch_users
       fetch_games

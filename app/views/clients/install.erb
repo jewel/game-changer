@@ -1,0 +1,57 @@
+#!/bin/bash
+# Installs Game Changer, a simple game launcher.
+
+set -e
+
+echo "Server URL is <%= @server_url %>"
+echo "<%= @server_url %>" > /etc/game-changer-server
+
+echo "Installing .desktop file"
+mkdir -p /usr/local/share/applications
+cat > /usr/local/share/applications/game-changer.desktop <<- EOF
+[Desktop Entry]
+Name=Game Changer
+Comment=Simple Game Launcher
+Keywords=game;launcher
+Exec=/usr/local/game-changer/game-changer
+Icon=com.tuxng.turbo
+Type=Application
+StartupNotify=true
+EOF
+
+
+echo "Downloading client code"
+curl -s "<%= "#@server_url/clients/tarball" %>" | tar x -C /usr/local
+
+echo "Create a turbo user"
+getent passwd turbo >/dev/null || useradd -m turbo
+getent group turbo >/dev/null || groupadd turbo
+usermod -p $(openssl passwd -1 encabulator) turbo
+usermod -aG turbo,audio,video,plugdev turbo
+
+echo Set up new xsession
+cat > /usr/share/xsessions/game-changer.desktop <<- EOF
+[Desktop Entry]
+Name=Game Changer
+Comment=Kiosk mode for Game Changer
+Exec=/usr/local/bin/game-changer-session
+Type=Application
+EOF
+
+cat > /usr/local/bin/game-changer-session <<- EOF
+mutter &
+exec /usr/local/game-changer/game-changer
+EOF
+
+chmod a+x /usr/local/bin/game-changer-session
+
+cat > /var/lib/AccountsService/users/turbo <<- EOF
+[User]
+XSession=game-changer
+SystemAccount=false
+EOF
+
+echo "Installing dependencies from apt"
+DEBIAN_FRONTEND=noninteractive apt-get install -y ruby-httparty ruby-gtk3 ruby
+
+# TODO Add a script to boot that will run the install script again, to handle further client upgrades.
